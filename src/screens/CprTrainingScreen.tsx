@@ -204,20 +204,8 @@ export const CprTrainingScreen: React.FC = () => {
 
   return (
     <View style={[styles.container, isArMode && styles.arContainer]}>
-      {/* 3D Scene (Background when in AR Mode, or Embedded Container) */}
-      <Cpr3DScene
-        currentStep={currentStep.number}
-        isCompressing={isCompressing}
-        compressionCount={compressions}
-        arCameraEnabled={arCameraEnabled}
-        isArFullscreen={isArMode}
-        onToggleAr={() => setIsArMode(!isArMode)}
-        onCompressPress={triggerCompress}
-      />
-
-      {/* Floating Interactive HUD Layer (Always 100% visible in both normal and AR mode!) */}
-      <View style={[styles.hudOverlay, isArMode && styles.arHudOverlay]}>
-        {/* Top Header Bar */}
+      {/* Top Header Bar */}
+      <View style={[styles.headerSection, isArMode && styles.arHeaderSection]}>
         <View style={styles.topHeader}>
           <TouchableOpacity style={styles.iconBtn} onPress={() => setCurrentScreen('home')}>
             <ArrowLeft size={18} color="#0F172A" />
@@ -264,10 +252,23 @@ export const CprTrainingScreen: React.FC = () => {
             </View>
           )}
         </View>
+      </View>
 
-        {/* Spacer in non-AR mode so 3D scene sits in middle */}
-        {!isArMode && <View style={{ flex: 1 }} />}
+      {/* 3D Scene Viewport (Background when in AR Mode, or Embedded Container) */}
+      <View style={[styles.sceneWrapper, isArMode && styles.arSceneWrapper]} pointerEvents="box-none">
+        <Cpr3DScene
+          currentStep={currentStep.number}
+          isCompressing={isCompressing}
+          compressionCount={compressions}
+          arCameraEnabled={arCameraEnabled}
+          isArFullscreen={isArMode}
+          onToggleAr={() => setIsArMode(!isArMode)}
+          onCompressPress={triggerCompress}
+        />
+      </View>
 
+      {/* Floating Interactive Controls Layer */}
+      <View style={[styles.controlsSection, isArMode && styles.arControlsSection]} pointerEvents="box-none">
         {/* Step Instruction Card */}
         <View style={[styles.instructionCard, isArMode && styles.arInstructionCard]}>
           <Text style={styles.instructionText}>{currentStep.instruction}</Text>
@@ -429,20 +430,54 @@ const styles = StyleSheet.create({
   arContainer: {
     backgroundColor: '#000000',
   },
-  hudOverlay: {
-    flex: 1,
+  headerSection: {
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    justifyContent: 'space-between',
+    paddingTop: 10,
+    paddingBottom: 4,
+    gap: 6,
     zIndex: 10,
   },
-  arHudOverlay: {
+  arHeaderSection: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    paddingBottom: 10,
+  },
+  sceneWrapper: {
+    flex: 1,
+    minHeight: 280,
+    marginHorizontal: 12,
+    marginVertical: 4,
+    borderRadius: 18,
+    overflow: 'hidden',
+  },
+  arSceneWrapper: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    marginHorizontal: 0,
+    marginVertical: 0,
+    borderRadius: 0,
+    zIndex: 0,
+  },
+  controlsSection: {
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    paddingTop: 4,
+    zIndex: 10,
+  },
+  arControlsSection: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
   },
   topHeader: {
     flexDirection: 'row',

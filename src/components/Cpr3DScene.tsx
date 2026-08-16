@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { Eye, RotateCcw } from 'lucide-react';
+import { Eye, RotateCcw, ZoomIn, ZoomOut, Plus, Minus, Play, Pause } from 'lucide-react';
 
 interface Cpr3DSceneProps {
   currentStep: number;
@@ -36,8 +36,9 @@ export const Cpr3DScene: React.FC<Cpr3DSceneProps> = ({
   const [loadingProgress, setLoadingProgress] = useState<number | null>(0);
   const [modelLoaded, setModelLoaded] = useState<boolean>(false);
   const [activeModelName, setActiveModelName] = useState<string>('cpr_new.glb');
-  const [animationCount, setAnimationCount] = useState<number>(0);
   const [cameraStreamActive, setCameraStreamActive] = useState<boolean>(false);
+  const [isPlaying, setIsPlaying] = useState<boolean>(true);
+  const [modelScaleFactor, setModelScaleFactor] = useState<number>(1.0);
 
   // Initialize Real AR Camera Video Stream
   useEffect(() => {
@@ -61,13 +62,13 @@ export const Cpr3DScene: React.FC<Cpr3DSceneProps> = ({
     if (typeof window === 'undefined' || !containerRef.current) return;
 
     const width = containerRef.current.clientWidth || 360;
-    const height = containerRef.current.clientHeight || (isArFullscreen ? 600 : 260);
+    const height = containerRef.current.clientHeight || (isArFullscreen ? 600 : 280);
 
     const scene = new THREE.Scene();
     
     // Zoomed out camera position so the ENTIRE model is fully visible
-    const camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 1000);
-    camera.position.set(0, 3.8, 5.5);
+    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+    camera.position.set(0, 2.8, 4.2);
     camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
 
@@ -77,44 +78,57 @@ export const Cpr3DScene: React.FC<Cpr3DSceneProps> = ({
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
+    // Ensure touch actions work without page scroll interference
+    renderer.domElement.style.touchAction = 'none';
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
+    renderer.domElement.style.display = 'block';
+
     containerRef.current.innerHTML = '';
     containerRef.current.appendChild(renderer.domElement);
 
     // OrbitControls: Allows touch drag rotation and pinch zoom!
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.maxPolarAngle = Math.PI / 2 + 0.1;
-    controls.minDistance = 2.5;
-    controls.maxDistance = 10.0;
+    controls.dampingFactor = 0.08;
+    controls.maxPolarAngle = Math.PI / 2 + 0.15;
+    controls.minDistance = 0.8;
+    controls.maxDistance = 15.0;
+    controls.enableZoom = true;
+    controls.zoomSpeed = 1.4;
+    controls.enableRotate = true;
+    controls.rotateSpeed = 0.9;
+    controls.enablePan = true;
+    controls.panSpeed = 0.8;
+    controls.touches = {
+      ONE: THREE.TOUCH.ROTATE,
+      TWO: THREE.TOUCH.DOLLY_PAN,
+    };
     controls.target.set(0, 0, 0);
     controlsRef.current = controls;
 
-    // Green AR Spatial Floor Grid
-    const gridHelper = new THREE.GridHelper(10, 24, 0x00E676, 0x94A3B8);
-    gridHelper.position.y = -0.55;
-    scene.add(gridHelper);
-
-    // Shadow Plane
+    // Shadow Receiver Ground Plane (No visual grid lines)
     const shadowPlane = new THREE.Mesh(
-      new THREE.PlaneGeometry(10, 10),
-      new THREE.ShadowMaterial({ opacity: 0.3 })
+      new THREE.PlaneGeometry(20, 20),
+      new THREE.ShadowMaterial({ opacity: 0.25 })
     );
     shadowPlane.rotation.x = -Math.PI / 2;
-    shadowPlane.position.y = -0.54;
+    shadowPlane.position.y = -0.55;
     shadowPlane.receiveShadow = true;
     scene.add(shadowPlane);
 
     // Bright Studio Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 1.6);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.8);
     scene.add(ambientLight);
 
-    const mainLight = new THREE.DirectionalLight(0xffffff, 2.4);
+    const mainLight = new THREE.DirectionalLight(0xffffff, 2.5);
     mainLight.position.set(5, 10, 6);
     mainLight.castShadow = true;
+    mainLight.shadow.mapSize.width = 1024;
+    mainLight.shadow.mapSize.height = 1024;
     scene.add(mainLight);
 
-    const fillLight = new THREE.DirectionalLight(0xE0E7FF, 1.4);
+    const fillLight = new THREE.DirectionalLight(0xE0E7FF, 1.5);
     fillLight.position.set(-5, 5, -5);
     scene.add(fillLight);
 
@@ -165,7 +179,7 @@ export const Cpr3DScene: React.FC<Cpr3DSceneProps> = ({
     scene.add(proceduralPair);
     modelGroupRef.current = proceduralPair;
 
-    // Load Primary Model: /cpr_new.glb with perfect framing
+    // Load Primary Model: /cpr_new.glb with animation & perfect framing
     const loadCprNewGlb = () => {
       const loader = new GLTFLoader();
       loader.load(
@@ -173,17 +187,19 @@ export const Cpr3DScene: React.FC<Cpr3DSceneProps> = ({
         (gltf) => {
           setLoadingProgress(100);
           setModelLoaded(true);
-          setActiveModelName('cpr_new.glb (Animated CPR)');
+          setActiveModelName('cpr_new.glb (Animated)');
           scene.remove(proceduralPair);
 
           const model = gltf.scene;
 
+          // Initialize animations and play them in continuous infinite loop
           if (gltf.animations && gltf.animations.length > 0) {
-            setAnimationCount(gltf.animations.length);
             const mixer = new THREE.AnimationMixer(model);
             gltf.animations.forEach((clip) => {
               const action = mixer.clipAction(clip);
               action.reset();
+              action.setLoop(THREE.LoopRepeat, Infinity);
+              action.clampWhenFinished = false;
               action.setEffectiveWeight(1.0);
               action.setEffectiveTimeScale(1.0);
               action.play();
@@ -191,17 +207,17 @@ export const Cpr3DScene: React.FC<Cpr3DSceneProps> = ({
             mixerRef.current = mixer;
           }
 
-          // Exact Bounding Box Calculation for Perfect Full View
+          // Exact Bounding Box Calculation for Perfect View
           const box = new THREE.Box3().setFromObject(model);
           const size = box.getSize(new THREE.Vector3());
           const maxDim = Math.max(size.x, size.y, size.z);
-          const scale = 1.9 / (maxDim || 1);
+          const scale = 2.2 / (maxDim || 1);
           model.scale.setScalar(scale);
 
           box.setFromObject(model);
           const center = box.getCenter(new THREE.Vector3());
           model.position.sub(center);
-          model.position.y += 0.15;
+          model.position.y += 0.1;
 
           model.traverse((child) => {
             if ((child as THREE.Mesh).isMesh) {
@@ -225,7 +241,7 @@ export const Cpr3DScene: React.FC<Cpr3DSceneProps> = ({
           if (xhr.total > 0) {
             setLoadingProgress(Math.round((xhr.loaded / xhr.total) * 100));
           } else {
-            setLoadingProgress((prev) => Math.min(98, (prev || 0) + 5));
+            setLoadingProgress((prev) => Math.min(98, (prev || 0) + 10));
           }
         },
         (err) => {
@@ -246,10 +262,11 @@ export const Cpr3DScene: React.FC<Cpr3DSceneProps> = ({
           scene.remove(proceduralPair);
 
           if (fbx.animations && fbx.animations.length > 0) {
-            setAnimationCount(fbx.animations.length);
             const mixer = new THREE.AnimationMixer(fbx);
             fbx.animations.forEach((clip) => {
-              mixer.clipAction(clip).play();
+              const action = mixer.clipAction(clip);
+              action.setLoop(THREE.LoopRepeat, Infinity);
+              action.play();
             });
             mixerRef.current = mixer;
           }
@@ -257,13 +274,13 @@ export const Cpr3DScene: React.FC<Cpr3DSceneProps> = ({
           const box = new THREE.Box3().setFromObject(fbx);
           const size = box.getSize(new THREE.Vector3());
           const maxDim = Math.max(size.x, size.y, size.z);
-          const scale = 1.9 / (maxDim || 1);
+          const scale = 2.2 / (maxDim || 1);
           fbx.scale.setScalar(scale);
 
           box.setFromObject(fbx);
           const center = box.getCenter(new THREE.Vector3());
           fbx.position.sub(center);
-          fbx.position.y += 0.15;
+          fbx.position.y += 0.1;
 
           scene.add(fbx);
           modelGroupRef.current = fbx;
@@ -282,7 +299,7 @@ export const Cpr3DScene: React.FC<Cpr3DSceneProps> = ({
 
     loadCprNewGlb();
 
-    // Render & Animation Clock Loop
+    // Render & Animation Loop
     let animationFrameId: number;
     const clock = new THREE.Clock();
 
@@ -321,11 +338,61 @@ export const Cpr3DScene: React.FC<Cpr3DSceneProps> = ({
     if (targetRingRef.current) targetRingRef.current.visible = currentStep >= 6;
   }, [currentStep]);
 
+  // Zoom and Scale Controls
+  const handleZoomIn = () => {
+    if (cameraRef.current && controlsRef.current) {
+      cameraRef.current.position.multiplyScalar(0.8);
+      controlsRef.current.update();
+    }
+  };
+
+  const handleZoomOut = () => {
+    if (cameraRef.current && controlsRef.current) {
+      cameraRef.current.position.multiplyScalar(1.25);
+      controlsRef.current.update();
+    }
+  };
+
+  const handleScaleUp = () => {
+    if (modelGroupRef.current) {
+      modelGroupRef.current.scale.multiplyScalar(1.2);
+      setModelScaleFactor((prev) => +(prev * 1.2).toFixed(1));
+    }
+  };
+
+  const handleScaleDown = () => {
+    if (modelGroupRef.current) {
+      modelGroupRef.current.scale.multiplyScalar(0.833);
+      setModelScaleFactor((prev) => +(prev * 0.833).toFixed(1));
+    }
+  };
+
+  const handleTogglePlay = () => {
+    if (mixerRef.current) {
+      if (isPlaying) {
+        mixerRef.current.timeScale = 0;
+        setIsPlaying(false);
+      } else {
+        mixerRef.current.timeScale = 1;
+        setIsPlaying(true);
+      }
+    }
+  };
+
   const handleResetCamera = () => {
     if (cameraRef.current && controlsRef.current) {
-      cameraRef.current.position.set(0, 3.8, 5.5);
+      cameraRef.current.position.set(0, 2.8, 4.2);
       controlsRef.current.target.set(0, 0, 0);
       controlsRef.current.update();
+    }
+    if (modelGroupRef.current) {
+      const box = new THREE.Box3().setFromObject(modelGroupRef.current);
+      const size = box.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+      if (maxDim > 0) {
+        modelGroupRef.current.scale.setScalar(2.2 / maxDim);
+        setModelScaleFactor(1.0);
+      }
     }
   };
 
@@ -348,47 +415,86 @@ export const Cpr3DScene: React.FC<Cpr3DSceneProps> = ({
         }}
       />
 
-      {/* Top Overlay Banner */}
-      <View style={styles.cameraOverlay}>
-        <Text style={styles.cameraText}>
-          📷 {isArFullscreen ? 'AR Live Room Stream' : 'Full 3D CPR View'} ({activeModelName})
-        </Text>
+      {/* Top Floating Control Bar */}
+      <View style={styles.topControlRow} pointerEvents="box-none">
+        <View style={styles.modelTagBadge}>
+          <Text style={styles.modelTagText}>
+            {isArFullscreen ? 'AR Live' : '3D CPR'}
+          </Text>
+        </View>
+
+        {/* Action Controls */}
+        <View style={styles.rightActionsRow}>
+          <TouchableOpacity style={styles.circleBtn} onPress={handleTogglePlay} activeOpacity={0.7}>
+            {isPlaying ? <Pause size={13} color="#0F172A" /> : <Play size={13} color="#16A34A" />}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.circleBtn} onPress={handleResetCamera} activeOpacity={0.7}>
+            <RotateCcw size={13} color="#0F172A" />
+          </TouchableOpacity>
+
+          {onToggleAr && (
+            <TouchableOpacity
+              style={[styles.viewInArBtn, isArFullscreen && { backgroundColor: '#16A34A' }]}
+              onPress={onToggleAr}
+              activeOpacity={0.8}
+            >
+              <Eye size={12} color="#FFFFFF" />
+              <Text style={styles.viewInArText}>
+                {isArFullscreen ? 'Exit AR' : 'AR View'}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
-      {/* Action Badges in Top Right */}
-      <View style={styles.actionBadgeRow}>
-        <TouchableOpacity style={styles.smallArBtn} onPress={handleResetCamera}>
-          <RotateCcw size={12} color="#0F172A" />
+      {/* Interactive Floating Zoom & Scale Panel on Right Side */}
+      <View style={styles.zoomScalePanel} pointerEvents="box-none">
+        <TouchableOpacity style={styles.zoomBtn} onPress={handleZoomIn} activeOpacity={0.7}>
+          <ZoomIn size={14} color="#0F172A" />
         </TouchableOpacity>
 
-        {onToggleAr && (
-          <TouchableOpacity
-            style={[styles.viewInArBtn, isArFullscreen && { backgroundColor: '#16A34A' }]}
-            onPress={onToggleAr}
-            activeOpacity={0.8}
-          >
-            <Eye size={12} color="#FFFFFF" />
-            <Text style={styles.viewInArText}>
-              {isArFullscreen ? 'Exit AR' : 'View in AR'}
-            </Text>
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity style={styles.zoomBtn} onPress={handleZoomOut} activeOpacity={0.7}>
+          <ZoomOut size={14} color="#0F172A" />
+        </TouchableOpacity>
+
+        <View style={styles.scaleDivider} />
+
+        <TouchableOpacity style={styles.scaleBtn} onPress={handleScaleUp} activeOpacity={0.7}>
+          <Plus size={13} color="#0F172A" />
+          <Text style={styles.scaleBtnLabel}>Size</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.scaleBtn} onPress={handleScaleDown} activeOpacity={0.7}>
+          <Minus size={13} color="#0F172A" />
+          <Text style={styles.scaleBtnLabel}>Size</Text>
+        </TouchableOpacity>
       </View>
 
       {loadingProgress !== null && !modelLoaded && (
         <View style={styles.loadingBanner}>
           <Text style={styles.loadingText}>
-            Loading 3D CPR Model (cpr_new.glb): {loadingProgress}%
+            Loading 3D Model: {loadingProgress}%
           </Text>
         </View>
       )}
 
-      {/* Touch drag prompt */}
-      <View style={styles.touchPromptPill}>
-        <Text style={styles.touchPromptText}>👆 Drag to rotate 3D model • Pinch to zoom</Text>
+      {/* Touch prompt */}
+      <View style={styles.touchPromptPill} pointerEvents="none">
+        <Text style={styles.touchPromptText}>👆 Drag to rotate • Pinch / buttons to resize</Text>
       </View>
 
-      <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative', zIndex: 1 }} />
+      {/* 3D WebGL Canvas Div */}
+      <div
+        ref={containerRef}
+        style={{
+          width: '100%',
+          height: '100%',
+          position: 'relative',
+          zIndex: 1,
+          touchAction: 'none',
+        }}
+      />
     </View>
   );
 };
@@ -396,7 +502,7 @@ export const Cpr3DScene: React.FC<Cpr3DSceneProps> = ({
 const styles = StyleSheet.create({
   container: {
     width: '100%',
-    height: 270,
+    height: 310,
     borderRadius: 18,
     overflow: 'hidden',
     backgroundColor: '#0F172A',
@@ -416,51 +522,54 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     zIndex: 0,
   },
-  cameraOverlay: {
+  topControlRow: {
     position: 'absolute',
-    top: 8,
-    left: 8,
-    zIndex: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.94)',
+    top: 10,
+    left: 10,
+    right: 10,
+    zIndex: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  modelTagBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.92)',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 12,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#00E676',
+    borderColor: '#E2E8F0',
     boxShadow: '0 2px 6px rgba(0, 0, 0, 0.08)',
   },
-  cameraText: {
+  modelTagText: {
     color: '#0F172A',
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: '700',
   },
-  actionBadgeRow: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    zIndex: 10,
+  rightActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
-  smallArBtn: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: 'rgba(255, 255, 255, 0.94)',
+  circleBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.92)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#CBD5E1',
+    borderColor: '#E2E8F0',
+    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.1)',
   },
   viewInArBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     backgroundColor: '#0284C7',
-    paddingHorizontal: 8,
+    paddingHorizontal: 9,
     paddingVertical: 5,
-    borderRadius: 12,
+    borderRadius: 14,
     boxShadow: '0 2px 6px rgba(2, 132, 199, 0.3)',
   },
   viewInArText: {
@@ -468,36 +577,81 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
   },
+  zoomScalePanel: {
+    position: 'absolute',
+    right: 10,
+    top: 50,
+    zIndex: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    borderRadius: 14,
+    padding: 4,
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.12)',
+  },
+  zoomBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scaleDivider: {
+    width: 20,
+    height: 1,
+    backgroundColor: '#CBD5E1',
+    marginVertical: 1,
+  },
+  scaleBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scaleBtnLabel: {
+    fontSize: 6,
+    fontWeight: '800',
+    color: '#64748B',
+    marginTop: -2,
+  },
   loadingBanner: {
     position: 'absolute',
-    bottom: 28,
-    left: 8,
-    zIndex: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.92)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
+    top: '45%',
+    left: '15%',
+    right: '15%',
+    zIndex: 25,
+    backgroundColor: 'rgba(15, 23, 42, 0.92)',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#CBD5E1',
+    borderColor: '#0284C7',
   },
   loadingText: {
-    color: '#334155',
-    fontSize: 9,
-    fontWeight: '600',
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
   },
   touchPromptPill: {
     position: 'absolute',
-    bottom: 6,
-    alignSelf: 'center',
+    bottom: 8,
+    left: 12,
+    right: 12,
     zIndex: 10,
     backgroundColor: 'rgba(15, 23, 42, 0.75)',
-    paddingHorizontal: 10,
-    paddingVertical: 3,
+    paddingVertical: 4,
     borderRadius: 10,
+    alignItems: 'center',
   },
   touchPromptText: {
-    color: '#E2E8F0',
-    fontSize: 8,
-    fontWeight: '500',
+    color: '#F8FAFC',
+    fontSize: 9,
+    fontWeight: '600',
   },
 });
