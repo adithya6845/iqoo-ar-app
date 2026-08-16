@@ -4,7 +4,22 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { Eye, RotateCcw, ZoomIn, ZoomOut, Plus, Minus, Play, Pause } from 'lucide-react';
+import {
+  Eye,
+  RotateCcw,
+  ZoomIn,
+  ZoomOut,
+  Plus,
+  Minus,
+  Play,
+  Pause,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  RotateCw,
+  Move,
+} from 'lucide-react';
 
 interface Bleeding3DSceneProps {
   currentStep: number;
@@ -25,10 +40,12 @@ export const Bleeding3DScene: React.FC<Bleeding3DSceneProps> = ({
   onToggleAr,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const controlsRef = useRef<OrbitControls | null>(null);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
   const modelGroupRef = useRef<THREE.Group | null>(null);
-  const controlsRef = useRef<OrbitControls | null>(null);
-  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const bloodParticlesRef = useRef<THREE.Points | null>(null);
   const woundLightRef = useRef<THREE.PointLight | null>(null);
   const tourniquetMeshRef = useRef<THREE.Mesh | null>(null);
@@ -39,13 +56,19 @@ export const Bleeding3DScene: React.FC<Bleeding3DSceneProps> = ({
   const [activeModelName, setActiveModelName] = useState<string>('Bleeding.glb');
   const [cameraStreamActive, setCameraStreamActive] = useState<boolean>(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
-  const [modelScaleFactor, setModelScaleFactor] = useState<number>(1.0);
+  const [showMoveControls, setShowMoveControls] = useState<boolean>(false);
 
   // Initialize Real AR Camera Video Stream
   useEffect(() => {
     if (arCameraEnabled && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       navigator.mediaDevices
-        .getUserMedia({ video: { facingMode: 'environment' } })
+        .getUserMedia({
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+        })
         .then((stream) => {
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
@@ -59,27 +82,27 @@ export const Bleeding3DScene: React.FC<Bleeding3DSceneProps> = ({
     }
   }, [arCameraEnabled]);
 
+  // Mount 3D Scene ONCE so it never resets when toggling AR mode
   useEffect(() => {
     if (typeof window === 'undefined' || !containerRef.current) return;
 
-    const width = containerRef.current.clientWidth || 360;
-    const height = containerRef.current.clientHeight || (isArFullscreen ? 600 : 280);
+    const width = containerRef.current.clientWidth || window.innerWidth || 360;
+    const height = containerRef.current.clientHeight || 280;
 
     const scene = new THREE.Scene();
-    
-    // Zoomed out camera position so the ENTIRE model is fully visible with no cutoffs
+    sceneRef.current = scene;
+
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
     camera.position.set(0, 2.8, 4.2);
     camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-    // Ensure touch actions work cleanly without page scroll interference
     renderer.domElement.style.touchAction = 'none';
     renderer.domElement.style.width = '100%';
     renderer.domElement.style.height = '100%';
@@ -87,20 +110,21 @@ export const Bleeding3DScene: React.FC<Bleeding3DSceneProps> = ({
 
     containerRef.current.innerHTML = '';
     containerRef.current.appendChild(renderer.domElement);
+    rendererRef.current = renderer;
 
-    // OrbitControls: Allows touch drag rotation and pinch zoom!
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
-    controls.maxPolarAngle = Math.PI / 2 + 0.15;
-    controls.minDistance = 0.8;
-    controls.maxDistance = 15.0;
+    controls.maxPolarAngle = Math.PI / 2 + 0.2;
+    controls.minDistance = 0.5;
+    controls.maxDistance = 25.0;
     controls.enableZoom = true;
     controls.zoomSpeed = 1.4;
     controls.enableRotate = true;
     controls.rotateSpeed = 0.9;
     controls.enablePan = true;
-    controls.panSpeed = 0.8;
+    controls.panSpeed = 0.9;
+    controls.screenSpacePanning = true;
     controls.touches = {
       ONE: THREE.TOUCH.ROTATE,
       TWO: THREE.TOUCH.DOLLY_PAN,
@@ -108,9 +132,9 @@ export const Bleeding3DScene: React.FC<Bleeding3DSceneProps> = ({
     controls.target.set(0, 0, 0);
     controlsRef.current = controls;
 
-    // Shadow Plane (No visual grid lines)
+    // Shadow Plane
     const shadowPlane = new THREE.Mesh(
-      new THREE.PlaneGeometry(20, 20),
+      new THREE.PlaneGeometry(25, 25),
       new THREE.ShadowMaterial({ opacity: 0.25 })
     );
     shadowPlane.rotation.x = -Math.PI / 2;
@@ -119,7 +143,7 @@ export const Bleeding3DScene: React.FC<Bleeding3DSceneProps> = ({
     scene.add(shadowPlane);
 
     // Studio Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 1.8);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 2.0);
     scene.add(ambientLight);
 
     const mainLight = new THREE.DirectionalLight(0xffffff, 2.5);
@@ -182,7 +206,7 @@ export const Bleeding3DScene: React.FC<Bleeding3DSceneProps> = ({
     scene.add(bloodParticles);
     bloodParticlesRef.current = bloodParticles;
 
-    // Fallback Procedural Model Group
+    // Fallback Initial Model Group
     const fallbackGroup = new THREE.Group();
     const torsoMat = new THREE.MeshStandardMaterial({ color: 0xE2E8F0, roughness: 0.3 });
     const torso = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.7, 0.45), torsoMat);
@@ -228,7 +252,6 @@ export const Bleeding3DScene: React.FC<Bleeding3DSceneProps> = ({
             mixerRef.current = mixer;
           }
 
-          // Exact Bounding Box Calculation for Perfect View
           const box = new THREE.Box3().setFromObject(model);
           const size = box.getSize(new THREE.Vector3());
           const maxDim = Math.max(size.x, size.y, size.z);
@@ -262,7 +285,7 @@ export const Bleeding3DScene: React.FC<Bleeding3DSceneProps> = ({
           if (xhr.total > 0) {
             setLoadingProgress(Math.round((xhr.loaded / xhr.total) * 100));
           } else {
-            setLoadingProgress((prev) => Math.min(98, (prev || 0) + 10));
+            setLoadingProgress((prev) => Math.min(98, (prev || 0) + 15));
           }
         },
         (err) => {
@@ -296,11 +319,7 @@ export const Bleeding3DScene: React.FC<Bleeding3DSceneProps> = ({
           scene.add(fbx);
           modelGroupRef.current = fbx;
         },
-        (xhr) => {
-          if (xhr.total > 0) {
-            setLoadingProgress(Math.round((xhr.loaded / xhr.total) * 100));
-          }
-        },
+        () => {},
         (err) => {
           console.warn('FBX fallback failed, using procedural bleeding model', err);
           setLoadingProgress(null);
@@ -326,7 +345,6 @@ export const Bleeding3DScene: React.FC<Bleeding3DSceneProps> = ({
         mixerRef.current.update(delta);
       }
 
-      // Animate blood flow particles if not fully bandaged
       if (bloodParticlesRef.current && currentStep < 6) {
         const posAttr = bloodParticlesRef.current.geometry.attributes.position as THREE.BufferAttribute;
         const posArray = posAttr.array as Float32Array;
@@ -336,7 +354,6 @@ export const Bleeding3DScene: React.FC<Bleeding3DSceneProps> = ({
           posArray[i * 3] += velocities[i].x;
           posArray[i * 3 + 2] += velocities[i].z;
 
-          // Reset particle if it falls too far
           if (posArray[i * 3 + 1] > 0.45) {
             posArray[i * 3] = 0.35 + (Math.random() - 0.5) * 0.08;
             posArray[i * 3 + 1] = 0.12;
@@ -356,9 +373,30 @@ export const Bleeding3DScene: React.FC<Bleeding3DSceneProps> = ({
       if (renderer.domElement) renderer.domElement.remove();
       renderer.dispose();
     };
+  }, []);
+
+  // Seamless resize on AR mode toggle or window change
+  useEffect(() => {
+    const handleResize = () => {
+      if (!containerRef.current || !rendererRef.current || !cameraRef.current) return;
+      const width = containerRef.current.clientWidth || window.innerWidth;
+      const height = containerRef.current.clientHeight || (isArFullscreen ? window.innerHeight : 280);
+      cameraRef.current.aspect = width / height;
+      cameraRef.current.updateProjectionMatrix();
+      rendererRef.current.setSize(width, height);
+    };
+
+    handleResize();
+    const t1 = setTimeout(handleResize, 100);
+    const t2 = setTimeout(handleResize, 300);
+    window.addEventListener('resize', handleResize);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      window.removeEventListener('resize', handleResize);
+    };
   }, [isArFullscreen]);
 
-  // Adjust blood particles and tourniquet based on treatment step
   useEffect(() => {
     if (bloodParticlesRef.current) {
       bloodParticlesRef.current.visible = currentStep < 6;
@@ -368,32 +406,31 @@ export const Bleeding3DScene: React.FC<Bleeding3DSceneProps> = ({
     }
   }, [currentStep]);
 
-  // Zoom and Scale Controls
-  const handleZoomIn = () => {
-    if (cameraRef.current && controlsRef.current) {
-      cameraRef.current.position.multiplyScalar(0.8);
-      controlsRef.current.update();
-    }
-  };
-
-  const handleZoomOut = () => {
-    if (cameraRef.current && controlsRef.current) {
-      cameraRef.current.position.multiplyScalar(1.25);
-      controlsRef.current.update();
-    }
-  };
-
-  const handleScaleUp = () => {
+  // Model Actions
+  const handleScaleModel = (factor: number) => {
     if (modelGroupRef.current) {
-      modelGroupRef.current.scale.multiplyScalar(1.2);
-      setModelScaleFactor((prev) => +(prev * 1.2).toFixed(1));
+      modelGroupRef.current.scale.multiplyScalar(factor);
     }
   };
 
-  const handleScaleDown = () => {
+  const handleMoveModel = (dx: number, dz: number, dy = 0) => {
     if (modelGroupRef.current) {
-      modelGroupRef.current.scale.multiplyScalar(0.833);
-      setModelScaleFactor((prev) => +(prev * 0.833).toFixed(1));
+      modelGroupRef.current.position.x += dx;
+      modelGroupRef.current.position.z += dz;
+      modelGroupRef.current.position.y += dy;
+    }
+  };
+
+  const handleRotateModel = (radians: number) => {
+    if (modelGroupRef.current) {
+      modelGroupRef.current.rotation.y += radians;
+    }
+  };
+
+  const handleZoom = (factor: number) => {
+    if (cameraRef.current && controlsRef.current) {
+      cameraRef.current.position.multiplyScalar(factor);
+      controlsRef.current.update();
     }
   };
 
@@ -409,19 +446,20 @@ export const Bleeding3DScene: React.FC<Bleeding3DSceneProps> = ({
     }
   };
 
-  const handleResetCamera = () => {
+  const handleReset = () => {
     if (cameraRef.current && controlsRef.current) {
       cameraRef.current.position.set(0, 2.8, 4.2);
       controlsRef.current.target.set(0, 0, 0);
       controlsRef.current.update();
     }
     if (modelGroupRef.current) {
+      modelGroupRef.current.position.set(0, 0.1, 0);
+      modelGroupRef.current.rotation.set(0, 0, 0);
       const box = new THREE.Box3().setFromObject(modelGroupRef.current);
       const size = box.getSize(new THREE.Vector3());
       const maxDim = Math.max(size.x, size.y, size.z);
       if (maxDim > 0) {
         modelGroupRef.current.scale.setScalar(2.2 / maxDim);
-        setModelScaleFactor(1.0);
       }
     }
   };
@@ -440,7 +478,7 @@ export const Bleeding3DScene: React.FC<Bleeding3DSceneProps> = ({
           width: '100%',
           height: '100%',
           objectFit: 'cover',
-          opacity: cameraStreamActive ? (isArFullscreen ? 0.65 : 0.45) : 0,
+          opacity: cameraStreamActive ? (isArFullscreen ? 0.7 : 0.45) : 0,
           zIndex: 0,
         }}
       />
@@ -449,17 +487,25 @@ export const Bleeding3DScene: React.FC<Bleeding3DSceneProps> = ({
       <View style={styles.topControlRow} pointerEvents="box-none">
         <View style={styles.modelTagBadge}>
           <Text style={styles.modelTagText}>
-            {isArFullscreen ? 'AR Live' : '3D Wound'}
+            {isArFullscreen ? 'AR Live Room' : '3D Wound Model'}
           </Text>
         </View>
 
         {/* Action Controls */}
-        <View style={styles.rightActionsRow}>
+        <View style={styles.rightActionsRow} pointerEvents="box-none">
+          <TouchableOpacity
+            style={[styles.circleBtn, showMoveControls && { backgroundColor: '#0284C7' }]}
+            onPress={() => setShowMoveControls(!showMoveControls)}
+            activeOpacity={0.7}
+          >
+            <Move size={13} color={showMoveControls ? '#FFFFFF' : '#0F172A'} />
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.circleBtn} onPress={handleTogglePlay} activeOpacity={0.7}>
             {isPlaying ? <Pause size={13} color="#0F172A" /> : <Play size={13} color="#16A34A" />}
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.circleBtn} onPress={handleResetCamera} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.circleBtn} onPress={handleReset} activeOpacity={0.7}>
             <RotateCcw size={13} color="#0F172A" />
           </TouchableOpacity>
 
@@ -471,35 +517,104 @@ export const Bleeding3DScene: React.FC<Bleeding3DSceneProps> = ({
             >
               <Eye size={12} color="#FFFFFF" />
               <Text style={styles.viewInArText}>
-                {isArFullscreen ? 'Exit AR' : 'AR View'}
+                {isArFullscreen ? 'Exit AR' : 'View in AR'}
               </Text>
             </TouchableOpacity>
           )}
         </View>
       </View>
 
-      {/* Interactive Floating Zoom & Scale Panel on Right Side */}
+      {/* Interactive Size & Zoom Control Panel */}
       <View style={styles.zoomScalePanel} pointerEvents="box-none">
-        <TouchableOpacity style={styles.zoomBtn} onPress={handleZoomIn} activeOpacity={0.7}>
-          <ZoomIn size={14} color="#0F172A" />
+        <TouchableOpacity
+          style={[styles.scaleBtn, { backgroundColor: '#DCFCE7' }]}
+          onPress={() => handleScaleModel(1.2)}
+          activeOpacity={0.7}
+        >
+          <Plus size={15} color="#16A34A" />
+          <Text style={[styles.scaleBtnLabel, { color: '#16A34A' }]}>Size +</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.zoomBtn} onPress={handleZoomOut} activeOpacity={0.7}>
-          <ZoomOut size={14} color="#0F172A" />
+        <TouchableOpacity
+          style={[styles.scaleBtn, { backgroundColor: '#FEE2E2' }]}
+          onPress={() => handleScaleModel(0.833)}
+          activeOpacity={0.7}
+        >
+          <Minus size={15} color="#DC2626" />
+          <Text style={[styles.scaleBtnLabel, { color: '#DC2626' }]}>Size -</Text>
         </TouchableOpacity>
 
         <View style={styles.scaleDivider} />
 
-        <TouchableOpacity style={styles.scaleBtn} onPress={handleScaleUp} activeOpacity={0.7}>
-          <Plus size={13} color="#0F172A" />
-          <Text style={styles.scaleBtnLabel}>Size</Text>
+        <TouchableOpacity
+          style={styles.zoomBtn}
+          onPress={() => handleRotateModel(-Math.PI / 8)}
+          activeOpacity={0.7}
+        >
+          <RotateCcw size={13} color="#0F172A" />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.scaleBtn} onPress={handleScaleDown} activeOpacity={0.7}>
-          <Minus size={13} color="#0F172A" />
-          <Text style={styles.scaleBtnLabel}>Size</Text>
+        <TouchableOpacity
+          style={styles.zoomBtn}
+          onPress={() => handleRotateModel(Math.PI / 8)}
+          activeOpacity={0.7}
+        >
+          <RotateCw size={13} color="#0F172A" />
+        </TouchableOpacity>
+
+        <View style={styles.scaleDivider} />
+
+        <TouchableOpacity style={styles.zoomBtn} onPress={() => handleZoom(0.8)} activeOpacity={0.7}>
+          <ZoomIn size={13} color="#0F172A" />
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.zoomBtn} onPress={() => handleZoom(1.25)} activeOpacity={0.7}>
+          <ZoomOut size={13} color="#0F172A" />
         </TouchableOpacity>
       </View>
+
+      {/* AR D-Pad Position Mover */}
+      {(showMoveControls || isArFullscreen) && (
+        <View style={styles.dpadMover} pointerEvents="box-none">
+          <View style={styles.dpadRow}>
+            <TouchableOpacity
+              style={styles.dpadBtn}
+              onPress={() => handleMoveModel(0, -0.25)}
+              activeOpacity={0.7}
+            >
+              <ArrowUp size={16} color="#0F172A" />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.dpadRowCenter}>
+            <TouchableOpacity
+              style={styles.dpadBtn}
+              onPress={() => handleMoveModel(-0.25, 0)}
+              activeOpacity={0.7}
+            >
+              <ArrowLeft size={16} color="#0F172A" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.dpadCenterBtn} onPress={handleReset} activeOpacity={0.7}>
+              <Text style={styles.dpadCenterText}>Reset</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.dpadBtn}
+              onPress={() => handleMoveModel(0.25, 0)}
+              activeOpacity={0.7}
+            >
+              <ArrowRight size={16} color="#0F172A" />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.dpadRow}>
+            <TouchableOpacity
+              style={styles.dpadBtn}
+              onPress={() => handleMoveModel(0, 0.25)}
+              activeOpacity={0.7}
+            >
+              <ArrowDown size={16} color="#0F172A" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       {loadingProgress !== null && !modelLoaded && (
         <View style={styles.loadingBanner}>
@@ -511,7 +626,9 @@ export const Bleeding3DScene: React.FC<Bleeding3DSceneProps> = ({
 
       {/* Touch prompt */}
       <View style={styles.touchPromptPill} pointerEvents="none">
-        <Text style={styles.touchPromptText}>👆 Drag to rotate • Pinch / buttons to resize</Text>
+        <Text style={styles.touchPromptText}>
+          👆 Touch & Drag to Move • Use Size (+/-) and Arrows to position in room
+        </Text>
       </View>
 
       {/* 3D WebGL Canvas Div */}
@@ -557,19 +674,19 @@ const styles = StyleSheet.create({
     top: 10,
     left: 10,
     right: 10,
-    zIndex: 20,
+    zIndex: 25,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
   modelTagBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.08)',
+    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.1)',
   },
   modelTagText: {
     color: '#0F172A',
@@ -582,25 +699,25 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   circleBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.1)',
+    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.12)',
   },
   viewInArBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     backgroundColor: '#0284C7',
-    paddingHorizontal: 9,
-    paddingVertical: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 14,
-    boxShadow: '0 2px 6px rgba(2, 132, 199, 0.3)',
+    boxShadow: '0 2px 8px rgba(2, 132, 199, 0.35)',
   },
   viewInArText: {
     color: '#FFFFFF',
@@ -610,51 +727,97 @@ const styles = StyleSheet.create({
   zoomScalePanel: {
     position: 'absolute',
     right: 10,
-    top: 50,
-    zIndex: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    top: 48,
+    zIndex: 25,
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
     borderRadius: 14,
-    padding: 4,
+    padding: 5,
     alignItems: 'center',
-    gap: 4,
+    gap: 5,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.12)',
+    boxShadow: '0 4px 14px rgba(0, 0, 0, 0.15)',
   },
   zoomBtn: {
-    width: 28,
-    height: 28,
+    width: 32,
+    height: 30,
     borderRadius: 8,
     backgroundColor: '#F1F5F9',
     alignItems: 'center',
     justifyContent: 'center',
   },
   scaleDivider: {
-    width: 20,
+    width: 22,
     height: 1,
     backgroundColor: '#CBD5E1',
     marginVertical: 1,
   },
   scaleBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
+    width: 38,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  scaleBtnLabel: {
+    fontSize: 7,
+    fontWeight: '800',
+    marginTop: -2,
+  },
+  dpadMover: {
+    position: 'absolute',
+    left: 10,
+    bottom: 25,
+    zIndex: 25,
+    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    padding: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    boxShadow: '0 4px 14px rgba(0, 0, 0, 0.15)',
+    alignItems: 'center',
+  },
+  dpadRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  dpadRowCenter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginVertical: 2,
+  },
+  dpadBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     backgroundColor: '#F1F5F9',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
   },
-  scaleBtnLabel: {
-    fontSize: 6,
-    fontWeight: '800',
-    color: '#64748B',
-    marginTop: -2,
+  dpadCenterBtn: {
+    width: 36,
+    height: 34,
+    borderRadius: 8,
+    backgroundColor: '#E2E8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dpadCenterText: {
+    fontSize: 8,
+    fontWeight: '700',
+    color: '#475569',
   },
   loadingBanner: {
     position: 'absolute',
     top: '45%',
     left: '15%',
     right: '15%',
-    zIndex: 25,
+    zIndex: 30,
     backgroundColor: 'rgba(15, 23, 42, 0.92)',
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -670,18 +833,19 @@ const styles = StyleSheet.create({
   },
   touchPromptPill: {
     position: 'absolute',
-    bottom: 8,
-    left: 12,
-    right: 12,
-    zIndex: 10,
-    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    bottom: 6,
+    left: 10,
+    right: 10,
+    zIndex: 15,
+    backgroundColor: 'rgba(15, 23, 42, 0.78)',
     paddingVertical: 4,
     borderRadius: 10,
     alignItems: 'center',
   },
   touchPromptText: {
     color: '#F8FAFC',
-    fontSize: 9,
+    fontSize: 8.5,
     fontWeight: '600',
+    textAlign: 'center',
   },
 });
